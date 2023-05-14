@@ -9,7 +9,6 @@ import logging
 from datetime import datetime, date, time
 from typing import Union, Optional
 
-import backoff
 import requests
 from deprecated import deprecated
 
@@ -83,7 +82,7 @@ class Ryanair:
             params.update(custom_params)
 
         try:
-            response = self._retryable_query(query_url, params)["fares"]
+            response = self._query(query_url, params)["fares"]
         except Exception:
             logger.exception(f"Failed to parse response when querying {query_url}")
             return []
@@ -144,7 +143,7 @@ class Ryanair:
             params.update(custom_params)
 
         try:
-            response = self._retryable_query(query_url, params)["fares"]
+            response = self._query(query_url, params)["fares"]
         except Exception as e:
             logger.exception(f"Failed to parse response when querying {query_url}")
             return []
@@ -203,15 +202,9 @@ class Ryanair:
         try:
             # Try once to get a new session cookie, just in case the old one has expired.
             # If that fails too, we should raise the exception.
-            response = self._retryable_query(query_url, params)
+            response = self._query(query_url, params)
             if self.check_if_availability_response_is_declined(response):
-                logger.warning(
-                    "Availability API declined to respond, attempting again with a new session cookie"
-                )
-                self._update_session_cookie()
-                response = self._retryable_query(query_url, params)
-                if self.check_if_availability_response_is_declined(response):
-                    raise AvailabilityException
+                raise AvailabilityException
 
             currency = response["currency"]
             trip = response["trips"][0]
@@ -229,10 +222,8 @@ class Ryanair:
                     )
                     for flight in flights
                 ]
-        except RyanairException:
-            logger.exception(
-                f"Failed to parse response when querying {query_url} with parameters {params}"
-            )
+        except RyanairException as e:
+            logger.warning(f"%s {query_url} {params}" % e)
             return []
         except Exception:
             logger.exception(
@@ -248,17 +239,8 @@ class Ryanair:
     def _on_query_error(e):
         logger.exception(f"Gave up retrying query, last exception was {e}")
 
-    @backoff.on_exception(
-        backoff.expo,
-        Exception,
-        max_tries=5,
-        logger=logger,
-        on_giveup=_on_query_error,
-        raise_on_giveup=False,
-    )
-    def _retryable_query(self, url, params):
+    def _query(self, url, params):
         self._num_queries += 1
-
         return self.session.get(url, params=params).json()
 
     def _update_session_cookie(self):
