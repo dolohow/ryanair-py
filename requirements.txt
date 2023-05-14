@@ -1,3 +1,2 @@
-requests
 Deprecated
-backoff
+playwright==1.33.0

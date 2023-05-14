@@ -9,8 +9,8 @@ import logging
 from datetime import datetime, date, time
 from typing import Union, Optional
 
-import requests
 from deprecated import deprecated
+from playwright.sync_api import sync_playwright
 
 from ryanair.types import Flight, Trip
 
@@ -40,13 +40,19 @@ class AvailabilityException(RyanairException):
 class Ryanair:
     BASE_SERVICES_API_URL = "https://services-api.ryanair.com/farfnd/v4/"
     BASE_AVAILABILITY_API_URL = "https://www.ryanair.com/api/booking/v4/"
-    BASE_SITE_FOR_SESSION_URL = "https://www.ryanair.com/ie/en"
+    BASE_SITE_FOR_SESSION_URL = "https://www.ryanair.com"
 
     def __init__(self, currency: Optional[str] = None):
         self.currency = currency
 
         self._num_queries = 0
-        self.session = requests.Session()
+        p = sync_playwright().start()
+
+        browser = p.firefox.launch(headless=True)
+        context = browser.new_context()
+        self.page = context.new_page()
+        self.api_request_context = context.request
+
         self._update_session_cookie()
 
     def get_cheapest_flights(
@@ -241,11 +247,11 @@ class Ryanair:
 
     def _query(self, url, params):
         self._num_queries += 1
-        return self.session.get(url, params=params).json()
+        return self.api_request_context.get(url, params=params).json()
 
     def _update_session_cookie(self):
         # Visit main website to get session cookies
-        self.session.get(Ryanair.BASE_SITE_FOR_SESSION_URL)
+        self.page.goto(self.BASE_SITE_FOR_SESSION_URL)
 
     def _parse_cheapest_flight(self, flight):
         currency = flight["price"]["currencyCode"]
